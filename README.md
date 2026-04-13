@@ -13,6 +13,8 @@
 
 DYPO is a reinforcement learning framework that dynamically routes each prompt to the most suitable training objective based on online rollout performance.
 
+> News: Our paper has been accepted to **ACL 2026 Findings**.
+
 It extends GRPO/PPO with a sample-wise strategy:
 - Hard samples (all failed rollouts) -> SFT
 - Easy samples (all successful rollouts) -> filtered out
@@ -151,10 +153,15 @@ dypo/
 If DYPO is useful for your work, please cite:
 
 ```bibtex
-@article{dypo2025,
+@article{dypo2026,
   title={DYPO: Dynamic Policy Optimization for Large Language Model Reasoning},
   author={...},
-  year={2025}
+  journal={arXiv preprint arXiv:2604.08926},
+  year={2026},
+  eprint={2604.08926},
+  archivePrefix={arXiv},
+  primaryClass={cs.CL},
+  note={Accepted to Findings of ACL 2026}
 }
 ```
 
