@@ -44,7 +44,7 @@ It extends GRPO/PPO with a sample-wise strategy:
 ## Method Overview
 
 <p align="center">
-  <img src="assets/workflow.png" alt="DYPO Workflow" width="800">
+  <img src="workflow.png" alt="DYPO Workflow" width="800">
 </p>
 
 For each training batch:
