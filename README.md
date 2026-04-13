@@ -154,15 +154,14 @@ dypo/
 If DYPO is useful for your work, please cite:
 
 ```bibtex
-@article{dypo2026,
-  title={DYPO: Dynamic Policy Optimization for Large Language Model Reasoning},
-  author={...},
-  journal={arXiv preprint arXiv:2604.08926},
-  year={2026},
-  eprint={2604.08926},
-  archivePrefix={arXiv},
-  primaryClass={cs.CL},
-  note={Accepted to Findings of ACL 2026}
+@misc{zhu2026bridgingsftrldynamic,
+      title={Bridging SFT and RL: Dynamic Policy Optimization for Robust Reasoning}, 
+      author={Taojie Zhu and Dongyang Xu and Ding Zou and Sen Zhao and Qiaobo Hao and Zhiguo Yang and Yonghong He},
+      year={2026},
+      eprint={2604.08926},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2604.08926}, 
 }
 ```
 
