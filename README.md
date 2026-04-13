@@ -1,7 +1,7 @@
 # DYPO
 
 <p align="center">
-  <strong>Dynamic Policy Optimization for LLM Reasoning</strong>
+  <strong>Bridging SFT and RL: Dynamic Policy Optimization for Robust Reasoning</strong>
 </p>
 
 <p align="center">
