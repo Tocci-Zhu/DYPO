@@ -15,7 +15,7 @@ DYPO is a reinforcement learning framework that dynamically routes each prompt t
 
 > News: Our paper has been accepted to **ACL 2026 Findings**.
 
-> Info: Our dataset will be released soon.
+> Info:  Our dataset will be released soon, with the code and data currently under company compliance review.
 
 It extends GRPO/PPO with a sample-wise strategy:
 - Hard samples (all failed rollouts) -> SFT
