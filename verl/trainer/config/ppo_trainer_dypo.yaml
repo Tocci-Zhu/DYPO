@@ -1,0 +1,419 @@
+# DYPO (Dynamic Policy Optimization) Trainer Configuration
+# Based on verl PPO trainer config with DYPO-specific extensions
+
+data:
+  tokenizer: null
+  use_shm: False
+  train_files: ~/data/rlhf/gsm8k/train.parquet
+  val_files: ~/data/rlhf/gsm8k/test.parquet
+  prompt_key: prompt
+  response_key: answer
+  reward_fn_key: data_source
+  max_prompt_length: 1024
+  max_response_length: 8192
+  train_batch_size: 16
+  val_batch_size: 512
+  return_raw_input_ids: False
+  return_raw_chat: False
+  return_full_prompt: False
+  reward_impl_version: 6
+  filter_targets: False
+  sample_target_ratio: 1.0
+  filter_accuracy: False
+  accuracy_lower_bound: 0.0
+  accuracy_upper_bound: 1.0
+  add_tgt_with_acc: False
+  add_tgt_acc_upper_bound: 0.5
+  disable_truncation_advantage: False
+  shuffle: True
+  filter_overlong_prompts: False
+  filter_overlong_prompts_workers: 1
+  truncation: right
+  image_key: images
+  video_key: videos
+  trust_remote_code: False
+  custom_cls:
+      path: null
+      name: null
+
+actor_rollout_ref:
+  hybrid_engine: True
+  model:
+    path: ~/models/Qwen2.5-Math-7B
+    sft: False
+    use_shm: False
+    external_lib: null
+    override_config: { }
+    enable_gradient_checkpointing: True
+    enable_activation_offload: False
+    use_remove_padding: True
+    lora_rank: 0
+    lora_alpha: 16
+    target_modules: all-linear
+    use_liger: False
+    use_fused_kernels: False
+    trust_remote_code: False
+  actor:
+    _target_: verl.workers.config.actor.FSDPActorConfig
+    strategy: fsdp2
+    ppo_mini_batch_size: 16
+    ppo_micro_batch_size: null
+    ppo_micro_batch_size_per_gpu: 1
+    use_dynamic_bsz: False
+    ppo_max_token_len_per_gpu: 8192
+    grad_clip: 1.0
+    clip_ratio: 0.2
+    clip_ratio_low: 0.2
+    clip_ratio_high: 0.2
+    clip_ratio_c: 3.0
+    clip_upper_bound: 1.0
+    loss_agg_mode: "seq-mean-token-mean"
+    entropy_coeff: 0.01
+    entropy_checkpointing: True
+    entropy_from_logits_with_chunking: True
+    use_sft: True
+    use_kl_loss: False
+    use_torch_compile: False
+    kl_loss_coef: 0.00
+    kl_loss_type: low_var_kl
+    contrastive_loss_coef: 0.001
+    ppo_epochs: 1
+    shuffle: False
+    ulysses_sequence_parallel_size: 1
+    checkpoint:
+      contents: ['model', 'optimizer', 'extra']
+    optim:
+      _target_: verl.workers.config.optimizer.FSDPOptimizerConfig
+      lr: 5e-7
+      sft_lr: 5e-6
+      lr_warmup_steps: -1
+      lr_warmup_steps_ratio: 0.
+      min_lr_ratio: 0.0
+      num_cycles: 0.5
+      warmup_style: constant
+      total_training_steps: -1
+      weight_decay: 0.01
+    fsdp_config:
+      _target_: verl.workers.config.engine.FSDPEngineConfig
+      wrap_policy:
+        min_num_params: 0
+      param_offload: False
+      grad_offload: False
+      optimizer_offload: False
+      offload_policy: True
+      reshard_after_forward: True
+      fsdp_size: -1
+    policy_loss:
+      _target_: verl.workers.config.actor.PolicyLossConfig
+    use_sft_prefix_reward: False
+    use_sft_reward: False
+    use_off_policy_loss: False
+    off_policy_loss_impl: token
+    off_policy_cliprange: 0.2
+    off_policy_normalize: False
+    use_off_policy_probs: False
+    use_off_policy_clip: False
+    off_policy_max_clip: -1
+    off_policy_min_clip: -1
+    off_policy_reshape: "no_reshape"
+    off_policy_reshape_weight: 0.1
+    off_policy_reshape_pow_exp: 0.5
+    on_policy_reshape: "no_reshape"
+    on_policy_reshape_weight: 0.1
+    on_policy_reshape_pow_exp: 0.5
+    sft_prefix_reward_weight: 1.0
+    all_max_clip: -1
+    use_ppo_kl_loss: False
+    ppo_kl_loss_coef: 0.01
+    use_adaptive_temperature: False
+    use_adaptive_temperature_fixed: False
+    adaptive_temperature_clip: -1
+    adaptive_temperature_target_entropy: 1.0
+    alpha_lr: 1e-2
+    debug: False
+    use_target_lst: False
+    loss_remove_token_mean: False
+    loss_remove_clip: False
+    sft_loss_coef: 1.0
+    use_sft_multitask_loss: False
+    offline_loss_type: "sft"
+    srft_type: "paper"
+  ref:
+    strategy: fsdp2
+    fsdp_config:
+      _target_: verl.workers.config.engine.FSDPEngineConfig
+      wrap_policy:
+        min_num_params: 0
+      param_offload: False
+      reshard_after_forward: True
+      fsdp_size: -1
+    use_torch_compile: ${actor_rollout_ref.actor.use_torch_compile}
+    log_prob_micro_batch_size: null
+    log_prob_micro_batch_size_per_gpu: 16
+    log_prob_use_dynamic_bsz: ${actor_rollout_ref.actor.use_dynamic_bsz}
+    log_prob_max_token_len_per_gpu: ${actor_rollout_ref.actor.ppo_max_token_len_per_gpu}
+    ulysses_sequence_parallel_size: ${actor_rollout_ref.actor.ulysses_sequence_parallel_size}
+    use_ref: False
+  rollout:
+    _target_: verl.workers.config.rollout.RolloutConfig
+    name: vllm
+    mode: sync
+    chat_scheduler: null
+    temperature: 1.0
+    val_temperature: 0.6
+    top_k: -1
+    top_p: 1
+    use_fire_sampling: False
+    prompt_length: ${data.max_prompt_length}
+    response_length: ${data.max_response_length}
+    dtype: bfloat16
+    gpu_memory_utilization: 0.7
+    ignore_eos: False
+    enforce_eager: True
+    free_cache_engine: True
+    load_format: dummy_dtensor
+    layered_summon: False
+    tensor_model_parallel_size: 1
+    max_num_batched_tokens: 131072
+    max_model_len: null
+    max_num_seqs: 1024
+    log_prob_micro_batch_size: null
+    log_prob_micro_batch_size_per_gpu: 16
+    log_prob_use_dynamic_bsz: ${actor_rollout_ref.actor.use_dynamic_bsz}
+    log_prob_max_token_len_per_gpu: ${actor_rollout_ref.actor.ppo_max_token_len_per_gpu}
+    disable_log_stats: True
+    enable_chunked_prefill: True
+    do_sample: True
+    n: 8
+    n_verify: 4
+    n_val: 8
+    engine_kwargs:
+      vllm:
+        swap_space: null
+      sglang:
+        attention_backend: null
+    val_kwargs:
+      top_k: -1
+      top_p: 1.0
+      temperature: 0
+      n: 1
+      do_sample: False
+    multi_turn:
+      enable: False
+      max_turns: null
+      tool_config_path: null
+      format: chatml
+    # DYPO prefix configurations
+    prefix_strategy: random
+    prefix_steps: 1000
+    prefix_linear_max_ratio: 0.8
+    prefix_linear_max_var: 0.1
+    max_prefix_len: 8192
+    min_prefix_ratio: 1.0
+    max_prefix_ratio: 1.0
+    prefix_reward_strategy: all
+    prefix_reward_weight_alpha: 1.0
+    prefix_reward_weight_beta: 1.0
+    prefix_share_across_samples: False
+    n_prefix: 1
+
+critic:
+  rollout_n: ${actor_rollout_ref.rollout.n}
+  strategy: fsdp
+  enable: False
+  optim:
+    lr: 1e-5
+    lr_warmup_steps_ratio: 0.
+    min_lr_ratio: null
+    warmup_style: constant
+    total_training_steps: -1
+    weight_decay: 0.01
+  model:
+    path: ~/models/Qwen2.5-Math-7B
+    use_shm: False
+    tokenizer_path: ${actor_rollout_ref.model.path}
+    override_config: { }
+    external_lib: ${actor_rollout_ref.model.external_lib}
+    enable_gradient_checkpointing: True
+    enable_activation_offload: False
+    use_remove_padding: False
+    trust_remote_code: ${actor_rollout_ref.model.trust_remote_code}
+    lora_rank: 0
+    lora_alpha: 16
+    target_modules: all-linear
+    fsdp_config:
+      _target_: verl.workers.config.engine.FSDPEngineConfig
+      param_offload: False
+      grad_offload: False
+      optimizer_offload: False
+      offload_policy: False
+      reshard_after_forward: True
+      wrap_policy:
+        min_num_params: 0
+      fsdp_size: -1
+  ppo_mini_batch_size: ${actor_rollout_ref.actor.ppo_mini_batch_size}
+  ppo_micro_batch_size: null
+  ppo_micro_batch_size_per_gpu: 8
+  forward_micro_batch_size_per_gpu: ${critic.ppo_micro_batch_size_per_gpu}
+  use_dynamic_bsz: ${actor_rollout_ref.actor.use_dynamic_bsz}
+  ppo_max_token_len_per_gpu: 32768
+  forward_max_token_len_per_gpu: ${critic.ppo_max_token_len_per_gpu}
+  ulysses_sequence_parallel_size: 1
+  ppo_epochs: ${actor_rollout_ref.actor.ppo_epochs}
+  shuffle: ${actor_rollout_ref.actor.shuffle}
+  grad_clip: 1.0
+  cliprange_value: 0.5
+  loss_agg_mode: ${actor_rollout_ref.actor.loss_agg_mode}
+  checkpoint:
+    contents: ['model', 'optimizer', 'extra']
+
+reward_model:
+  _target_: verl.workers.config.critic.FSDPCriticConfig
+  enable: False
+  strategy: fsdp
+  model:
+    input_tokenizer: ${actor_rollout_ref.model.path}
+    path: ~/models/FsfairX-LLaMA3-RM-v0.1
+    use_shm: False
+    external_lib: ${actor_rollout_ref.model.external_lib}
+    use_remove_padding: False
+    use_fused_kernels: ${actor_rollout_ref.model.use_fused_kernels}
+    trust_remote_code: False
+    fsdp_config:
+      _target_: verl.workers.config.engine.FSDPEngineConfig
+      wrap_policy:
+        min_num_params: 0
+      param_offload: False
+      reshard_after_forward: True
+      fsdp_size: -1
+  micro_batch_size: null
+  micro_batch_size_per_gpu: 8
+  max_length: null
+  ulysses_sequence_parallel_size: 1
+  use_dynamic_bsz: ${actor_rollout_ref.actor.use_dynamic_bsz}
+  forward_max_token_len_per_gpu: ${critic.ppo_max_token_len_per_gpu}
+  reward_manager: naive
+  launch_reward_fn_async: False
+  sandbox_fusion:
+    url: null
+    max_concurrent: 64
+
+custom_reward_function:
+  path: null
+  name: compute_score
+
+algorithm:
+  _target_: verl.trainer.config.AlgoConfig
+  gamma: 1.0
+  lam: 1.0
+  adv_estimator: grpo
+  norm_adv_by_std_in_grpo: True
+  grpo_use_std: True
+  use_kl_in_reward: False
+  kl_penalty: kl
+  kl_ctrl:
+    _target_: verl.trainer.config.KLControlConfig
+    type: fixed
+    kl_coef: 0.000
+    horizon: 10000
+    target_kl: 0.1
+  surprisal_base: 0.0
+  use_pf_ppo: False
+  pf_ppo:
+    reweight_method: pow
+    weight_pow: 2.0
+
+trainer:
+  # DYPO-specific: contrastive learning
+  enable_contrastive_reward_shaping: false
+  task_type: "math"
+  contrastive_loss_type: "infonce"
+  contrastive_temperature: 0.1
+  triplet_margin: 0.2
+  contrastive_reward_scale: 0.5
+  use_dynamic_reward_scale: false
+  min_reward_scale: 0.1
+  use_semantic_similarity: false
+  embedding_model_name: null
+  use_symbolic_verification: false
+  balance_batch: True
+
+  use_contrastive_loss: False
+  contrastive_beta: 0.1
+  contrastive_loss_on_failures: False
+  contrastive_weight_type: "inverse_success_rate"
+
+  rejection_sample: False
+  rejection_sample_multiplier: 2
+
+  # Training
+  total_epochs: 3
+  total_training_steps: null
+  project_name: dypo
+  experiment_name: dypo_math
+  logger: [ 'console', 'wandb' ]
+  log_val_generations: 0
+  rollout_data_dir: null
+  validation_data_dir: null
+  nnodes: 1
+  n_gpus_per_node: 8
+  save_freq: 200
+  max_optim_to_keep: 2
+  max_actor_ckpt_to_keep: null
+  max_critic_ckpt_to_keep: null
+  resume_mode: auto
+  resume_from_path: null
+  val_before_train: False
+  test_freq: -1
+  critic_warmup: 0
+  default_hdfs_dir: null
+  del_local_ckpt_after_load: False
+  default_local_dir: checkpoints/${trainer.project_name}/${trainer.experiment_name}
+  ray_wait_register_center_timeout: 300
+  device: cuda
+
+  # DYPO-specific: dynamic sample routing
+  debug: False
+  add_full_target_when_none: False
+  skip_valid_mask: False
+  acc_rebatch: False
+  skip_by_step: False
+  unify_strategy: "switch"
+  switch_gate: 0
+  switch_gate_off: 0
+  remove_p: "all"
+  remove_on: False
+  soft_type: 0
+  remove_sfted_data: False
+
+global_profiler:
+  _target_: verl.utils.profiler.ProfilerConfig
+  tool: null
+  steps: null
+  profile_continuous_steps: False
+  save_path: "outputs/profile"
+  global_tool_config:
+    nsys:
+      _target_: verl.utils.profiler.config.NsightToolConfig
+      discrete: False
+      controller_nsight_options:
+        trace: "cuda,nvtx,cublas,ucx"
+        cuda-memory-usage: "true"
+        cuda-graph-trace: "graph"
+      worker_nsight_options:
+        trace: "cuda,nvtx,cublas,ucx"
+        cuda-memory-usage: "true"
+        cuda-graph-trace: "graph"
+        capture-range: "cudaProfilerApi"
+        capture-range-end: null
+        kill: none
+    torch_memory:
+      trace_alloc_max_entries: 100_000
+      stack_depth: 32
+      context: "all"
+      stacks: "all"
+      kw_args: {}
+
+ray_init:
+  num_cpus: null
+  timeline_json_file: null

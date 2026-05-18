@@ -77,8 +77,8 @@ For each training batch:
 ### Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/dypo.git
-cd dypo
+git clone https://github.com/Tocci-Zhu/DYPO.git
+cd DYPO
 
 # install project dependencies
 pip install -e ".[vllm,math]"

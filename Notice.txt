@@ -1,0 +1,2 @@
+Copyright 2023-2024 Bytedance Ltd. and/or its affiliates (verl framework)
+Copyright 2025 DYPO contributors (Dynamic Policy Optimization additions)

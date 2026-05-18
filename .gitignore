@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Checkpoints & model weights
+checkpoints/
+ckpts_merged/
+*.pt
+*.bin
+*.safetensors
+
+# Hydra outputs
+outputs/
+
+# Test results
+test_results/
+
+# Temporary files
+tmp/
+*.pkl
+
+# Data (users should download their own)
+noe/
+*.parquet
+*.json
+!data/README.md
+
+# Environment
+.env
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Wandb
+wandb/
+
+# Ray
+/tmp/ray/
