@@ -155,14 +155,24 @@ dypo/
 If DYPO is useful for your work, please cite:
 
 ```bibtex
-@misc{zhu2026bridgingsftrldynamic,
-      title={Bridging SFT and RL: Dynamic Policy Optimization for Robust Reasoning}, 
-      author={Taojie Zhu and Dongyang Xu and Ding Zou and Sen Zhao and Qiaobo Hao and Zhiguo Yang and Yonghong He},
-      year={2026},
-      eprint={2604.08926},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG},
-      url={https://arxiv.org/abs/2604.08926}, 
+@inproceedings{zhu-etal-2026-bridging,
+    title = "Bridging {SFT} and {RL}: Dynamic Policy Optimization for Robust Reasoning",
+    author = "Zhu, Taojie  and
+      Xu, Dongyang  and
+      Zou, Ding  and
+      Zhao, Sen  and
+      Hao, Qiaobo  and
+      Yang, Zhiguo  and
+      He, Yonghong",
+    booktitle = "Findings of the {A}ssociation for {C}omputational {L}inguistics: {ACL} 2026",
+    month = jul,
+    year = "2026",
+    address = "San Diego, California, United States",
+    publisher = "Association for Computational Linguistics",
+    url = "https://aclanthology.org/2026.findings-acl.219/",
+    doi = "10.18653/v1/2026.findings-acl.219",
+    pages = "4468--4484",
+    ISBN = "979-8-89176-395-1",
 }
 ```
 
