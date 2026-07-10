@@ -193,6 +193,109 @@ def compute_sft_token_loss(log_prob, response_mask):
     sft_token_loss = verl_F.masked_mean(sft_losses, response_mask, axis=-1)
     return sft_loss, sft_token_loss
 
+
+def compute_gal_pairwise_loss_and_advantages(
+    success_log_probs: torch.Tensor,
+    failure_log_probs: torch.Tensor,
+    beta: float,
+    success_ref_log_probs: Optional[torch.Tensor] = None,
+    failure_ref_log_probs: Optional[torch.Tensor] = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Compute Group Alignment Loss pairs and a micro-batch-safe gradient surrogate.
+
+    GAL is a group-level objective, while actor updates may split a rollout group
+    across data-parallel ranks and micro-batches.  The returned trajectory
+    advantages decompose the pairwise GAL gradient into independent per-sample
+    terms.  For a group containing ``N`` trajectories, the following surrogate
+    has the same first-order gradient as ``pairwise_losses.mean()`` at the input
+    log probabilities::
+
+        -mean(gal_advantage[i] * current_sequence_log_prob[i] for i in group)
+
+    Args:
+        success_log_probs: Sequence log probabilities for successful rollouts.
+        failure_log_probs: Sequence log probabilities for failed rollouts.
+        beta: Positive inverse-temperature coefficient used by GAL.
+        success_ref_log_probs: Optional reference-policy sequence log probabilities.
+        failure_ref_log_probs: Optional reference-policy sequence log probabilities.
+
+    Returns:
+        A tuple of the pairwise loss matrix, successful-trajectory advantages,
+        and failed-trajectory advantages.  The advantages are detached because
+        they are coefficients for a first-order policy-gradient surrogate.
+    """
+    if success_log_probs.ndim != 1 or failure_log_probs.ndim != 1:
+        raise ValueError("GAL expects one-dimensional sequence log-probability tensors")
+    if success_log_probs.numel() == 0 or failure_log_probs.numel() == 0:
+        raise ValueError("GAL requires at least one successful and one failed rollout")
+    if beta <= 0:
+        raise ValueError(f"GAL beta must be positive, got {beta}")
+    if (success_ref_log_probs is None) != (failure_ref_log_probs is None):
+        raise ValueError("GAL reference log probabilities must be provided for both outcome groups")
+
+    success_log_ratios = success_log_probs
+    failure_log_ratios = failure_log_probs
+    if success_ref_log_probs is not None:
+        if success_ref_log_probs.shape != success_log_probs.shape:
+            raise ValueError("Successful reference log probabilities must match successful policy log probabilities")
+        if failure_ref_log_probs.shape != failure_log_probs.shape:
+            raise ValueError("Failed reference log probabilities must match failed policy log probabilities")
+        success_log_ratios = success_log_probs - success_ref_log_probs
+        failure_log_ratios = failure_log_probs - failure_ref_log_probs
+
+    pairwise_logits = beta * (success_log_ratios.unsqueeze(1) - failure_log_ratios.unsqueeze(0))
+    pairwise_losses = -torch.nn.functional.logsigmoid(pairwise_logits)
+
+    # d[-log(sigmoid(beta * d))]/dd = -beta * sigmoid(-beta * d).
+    # Multiplication by group_size converts the summed pairwise derivatives to
+    # advantages consumed by the actor's sample-mean policy-gradient surrogate.
+    pair_weights = torch.sigmoid(-pairwise_logits).detach()
+    num_pairs = pair_weights.numel()
+    group_size = success_log_probs.numel() + failure_log_probs.numel()
+    success_advantages = beta * group_size * pair_weights.sum(dim=1) / num_pairs
+    failure_advantages = -beta * group_size * pair_weights.sum(dim=0) / num_pairs
+
+    return pairwise_losses, success_advantages, failure_advantages
+
+
+def compute_gal_surrogate_loss(
+    current_log_probs: torch.Tensor,
+    response_mask: torch.Tensor,
+    gal_loss_values: torch.Tensor,
+    gal_advantages: torch.Tensor,
+    gal_mask: torch.Tensor,
+) -> torch.Tensor:
+    """Attach a precomputed GAL value to the current policy's autograd graph.
+
+    The forward value remains the exact pairwise GAL value computed on the
+    rollout group.  Its gradient is supplied by current model log probabilities,
+    so GAL participates in ``backward()`` even when related trajectories reside
+    in different actor micro-batches.
+    """
+    if current_log_probs.shape != response_mask.shape:
+        raise ValueError("Current log probabilities and response mask must have identical shapes")
+    batch_size = current_log_probs.shape[0]
+    if gal_loss_values.shape != (batch_size,):
+        raise ValueError("GAL loss values must contain one scalar per trajectory")
+    if gal_advantages.shape != (batch_size,):
+        raise ValueError("GAL advantages must contain one scalar per trajectory")
+    if gal_mask.shape != (batch_size,):
+        raise ValueError("GAL mask must contain one value per trajectory")
+
+    valid_mask = gal_mask.bool()
+    if not valid_mask.any():
+        raise ValueError("GAL surrogate requires at least one valid trajectory")
+
+    sequence_log_probs = (current_log_probs * response_mask).sum(dim=-1)
+    valid_weights = valid_mask.to(dtype=current_log_probs.dtype)
+    gradient_surrogate = -(gal_advantages.detach() * sequence_log_probs * valid_weights).mean()
+    loss_value = (gal_loss_values.detach() * valid_weights).mean()
+
+    # Keep the interpretable pairwise loss in the forward pass while replacing
+    # only its otherwise-disconnected gradient with the current-policy surrogate.
+    return loss_value + gradient_surrogate - gradient_surrogate.detach()
+
+
 def get_kl_controller(kl_ctrl):
     """Factory function to create appropriate KL controller based on configuration.
 

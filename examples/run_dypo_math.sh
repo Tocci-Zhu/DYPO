@@ -104,6 +104,7 @@ python3 -m verl.trainer.main_dypo \
     trainer.unify_strategy="$UNIFY_STRATEGY" \
     trainer.switch_gate="$SWITCH_GATE" \
     trainer.switch_gate_off=$SWITCH_GATE_OFF \
+    trainer.use_contrastive_loss=True \
     trainer.remove_sfted_data=False \
     actor_rollout_ref.actor.offline_loss_type="$OFFLINE_LOSS_TYPE" \
     actor_rollout_ref.actor.use_kl_loss=False \

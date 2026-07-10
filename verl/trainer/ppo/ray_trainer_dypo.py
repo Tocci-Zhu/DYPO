@@ -452,6 +452,16 @@ class RayPPOTrainer:
         
     def _validate_config(self):
         config = self.config
+        if config.trainer.get("use_contrastive_loss", False):
+            if config.actor_rollout_ref.actor.strategy not in {"fsdp", "fsdp2"}:
+                raise NotImplementedError(
+                    "Differentiable DYPO GAL currently supports the FSDP/FSDP2 actor path only"
+                )
+            if config.actor_rollout_ref.model.get("sft", False):
+                raise NotImplementedError(
+                    "Differentiable DYPO GAL requires actor_rollout_ref.model.sft=False"
+                )
+
         # number of GPUs total
         n_gpus = config.trainer.n_gpus_per_node * config.trainer.nnodes
         if config.actor_rollout_ref.actor.strategy == "megatron":
@@ -1377,6 +1387,7 @@ class RayPPOTrainer:
             batch: Updated batch containing:
                 - batch.batch['contrastive_loss']: [bsz] Contrastive loss for each sample
                 - batch.batch['contrastive_mask']: [bsz] Mark which samples have contrastive loss
+                - batch.batch['gal_advantages']: [bsz] Per-trajectory coefficients for the actor-side GAL surrogate
                 - batch.non_tensor_batch['contrastive_uid']: [bsz] UID corresponding to each sample
                 - batch.meta_info['contrastive_uid_loss']: dict[uid -> float] Contrastive loss for each prompt
                 - batch.meta_info['contrastive_prompt_stats']: dict[uid -> stats] Detailed statistics for each prompt
@@ -1387,6 +1398,7 @@ class RayPPOTrainer:
         
         reward_tensor = batch.batch['token_level_scores']
         old_log_probs = batch.batch['old_log_probs']
+        ref_log_probs = batch.batch['ref_log_prob'] if 'ref_log_prob' in batch.batch else None
         responses = batch.batch['responses']
         attention_mask = batch.batch['attention_mask']
         
@@ -1398,6 +1410,7 @@ class RayPPOTrainer:
         # Initialize
         contrastive_loss = torch.zeros(batch_size, dtype=torch.float32, device=device)
         contrastive_mask = torch.zeros(batch_size, dtype=torch.bool, device=device)
+        gal_advantages = torch.zeros(batch_size, dtype=torch.float32, device=device)
         
         # Used to store the uid corresponding to each sample
         contrastive_uids = np.array([''] * batch_size, dtype=object)
@@ -1432,14 +1445,29 @@ class RayPPOTrainer:
             # Compute sequence log probs (only response part)
             success_logp = (old_log_probs[success_indices] * response_mask[success_indices]).sum(-1)  # [S]
             fail_logp = (old_log_probs[fail_indices] * response_mask[fail_indices]).sum(-1)        # [F]
-            
-            # Vectorized Pairwise DPO loss: [S, F]
-            diff = success_logp.unsqueeze(1) - fail_logp.unsqueeze(0)  # [S, F]
-            logits = beta * diff
-            pairwise_loss = -torch.nn.functional.logsigmoid(logits)    # [S, F]
-            
-            # Compute the average contrastive learning loss for this prompt
-            prompt_avg_loss = pairwise_loss.mean().item()
+
+            success_ref_logp = None
+            fail_ref_logp = None
+            if ref_log_probs is not None:
+                success_ref_logp = (
+                    ref_log_probs[success_indices] * response_mask[success_indices]
+                ).sum(-1)
+                fail_ref_logp = (ref_log_probs[fail_indices] * response_mask[fail_indices]).sum(-1)
+
+            pairwise_loss, success_gal_advantages, failure_gal_advantages = (
+                core_algos.compute_gal_pairwise_loss_and_advantages(
+                    success_log_probs=success_logp,
+                    failure_log_probs=fail_logp,
+                    beta=beta,
+                    success_ref_log_probs=success_ref_logp,
+                    failure_ref_log_probs=fail_ref_logp,
+                )
+            )
+
+            # Keep the exact pairwise value for metrics/forward reporting.  The
+            # actor consumes gal_advantages with its fresh, differentiable log probs.
+            prompt_avg_loss_tensor = pairwise_loss.mean()
+            prompt_avg_loss = prompt_avg_loss_tensor.item()
             
             # Compute weighted loss (weighted based on success/failure ratio)
             n_success = success_mask.sum().item()
@@ -1459,8 +1487,10 @@ class RayPPOTrainer:
                 weighted_loss = prompt_avg_loss * (1.0 - success_rate)
             
             # Assign this prompt's loss to all samples of this UID
-            contrastive_loss[indices] = prompt_avg_loss
+            contrastive_loss[indices] = prompt_avg_loss_tensor.detach()
             contrastive_mask[indices] = True
+            gal_advantages[success_indices] = success_gal_advantages
+            gal_advantages[fail_indices] = failure_gal_advantages
             
             # Record the uid corresponding to each sample
             uid_indices_np = indices.cpu().numpy()
@@ -1489,6 +1519,7 @@ class RayPPOTrainer:
         # Store loss and mask in batch
         batch.batch['contrastive_loss'] = contrastive_loss
         batch.batch['contrastive_mask'] = contrastive_mask
+        batch.batch['gal_advantages'] = gal_advantages
 
         # Store the uid corresponding to each sample in non_tensor_batch
         batch.non_tensor_batch['contrastive_uid'] = contrastive_uids

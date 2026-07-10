@@ -28,7 +28,13 @@ from tensordict import TensorDict
 
 import verl.utils.torch_functional as verl_F
 from verl import DataProto
-from verl.trainer.ppo.core_algos import agg_loss, get_policy_loss_fn, kl_penalty, compute_sft_pure_loss
+from verl.trainer.ppo.core_algos import (
+    agg_loss,
+    compute_gal_surrogate_loss,
+    compute_sft_pure_loss,
+    get_policy_loss_fn,
+    kl_penalty,
+)
 from verl.utils.device import get_device_id, get_device_name, is_cuda_available, is_npu_available
 from verl.utils.fsdp_utils import FSDPModule, fsdp2_clip_grad_norm_
 from verl.utils.profiler import GPUMemoryLogger
@@ -734,11 +740,16 @@ class DataParallelPPOActor(BasePPOActor):
         if self.config.use_kl_loss:
             select_keys.append("ref_log_prob")
         
-        # Add contrastive learning keys if enabled
-        if 'contrastive_loss' in data.batch:
-            select_keys.append('contrastive_loss')
-        if 'contrastive_mask' in data.batch:
-            select_keys.append('contrastive_mask')
+        # GAL is computed group-wise on the controller.  All three tensors are
+        # required to reconstruct its differentiable actor-side surrogate.
+        gal_keys = {"contrastive_loss", "contrastive_mask", "gal_advantages"}
+        present_gal_keys = gal_keys.intersection(data.batch.keys())
+        if present_gal_keys and present_gal_keys != gal_keys:
+            missing_gal_keys = sorted(gal_keys - present_gal_keys)
+            raise ValueError(f"Incomplete GAL batch: missing {missing_gal_keys}")
+        has_gal = present_gal_keys == gal_keys
+        if has_gal:
+            select_keys.extend(sorted(gal_keys))
         
         # 保留 whether_pad 字段用于 mask
         if has_padding:
@@ -862,37 +873,32 @@ class DataParallelPPOActor(BasePPOActor):
                     else:
                         policy_loss = pg_loss
 
-                    # add contrastive learning loss
-                    if 'contrastive_loss' in data and 'contrastive_mask' in data:
-                        contrastive_loss_values = data['contrastive_loss']  # [bsz]
-                        contrastive_mask = data['contrastive_mask']  # [bsz]
-                        
-                        # 应用 whether_pad mask：排除 padding 样本
-                        if has_padding and 'whether_pad' in data:
-                            sample_valid_mask = ~data['whether_pad']  # [bsz]
-                            contrastive_mask = contrastive_mask & sample_valid_mask
-                        
-                        # only compute loss for samples with contrastive learning (partial success samples)
-                        if contrastive_mask.any():
-                            # compute mean contrastive loss
-                            contrastive_loss_mean = contrastive_loss_values[contrastive_mask].mean()
-                            
-                            # get coefficient from config
-                            contrastive_coef = self.config.get('contrastive_loss_coef', 0.1)
-                            
-                            # add to total loss
-                            policy_loss = policy_loss + contrastive_loss_mean * contrastive_coef
-                            
-                            # record metrics
-                            metrics['actor/contrastive_loss'] = contrastive_loss_mean.detach().item()
-                            metrics['actor/contrastive_samples'] = contrastive_mask.sum().item()
-                            metrics['actor/contrastive_ratio'] = contrastive_mask.float().mean().item()
+                    if has_gal:
+                        gal_mask = data["contrastive_mask"]
+                        if has_padding and "whether_pad" in data:
+                            gal_mask = gal_mask & ~data["whether_pad"]
 
-                            print(f"[RL Debug] contrastive_loss: {contrastive_loss_mean.item()}")
+                        if gal_mask.any():
+                            gal_loss = compute_gal_surrogate_loss(
+                                current_log_probs=log_prob,
+                                response_mask=response_mask,
+                                gal_loss_values=data["contrastive_loss"],
+                                gal_advantages=data["gal_advantages"],
+                                gal_mask=gal_mask,
+                            )
+                            gal_coef = self.config.get("contrastive_loss_coef", 0.1)
+                            policy_loss = policy_loss + gal_loss * gal_coef
 
+                            micro_batch_metrics["actor/gal_loss"] = gal_loss.detach().item() * loss_scale_factor
+                            # Preserve the old metric name for existing dashboards.
+                            micro_batch_metrics["actor/contrastive_loss"] = (
+                                gal_loss.detach().item() * loss_scale_factor
+                            )
+                            micro_batch_metrics["actor/gal_samples"] = gal_mask.sum().item()
+                            micro_batch_metrics["actor/gal_coef"] = gal_coef
 
                     if self.config.use_kl_loss:
-                        ref_log_prob = model_inputs["ref_log_prob"]
+                        ref_log_prob = data["ref_log_prob"]
                         # compute kl loss
                         kld = kl_penalty(
                             logprob=log_prob, ref_logprob=ref_log_prob, kl_penalty=self.config.kl_loss_type

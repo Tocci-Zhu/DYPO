@@ -125,7 +125,17 @@ bash examples/run_dypo_math.sh
 | `actor_rollout_ref.rollout.n` | `8` | Number of rollouts per prompt |
 | `actor_rollout_ref.actor.sft_loss_coef` | `1.0` | SFT loss coefficient for hard samples |
 | `actor_rollout_ref.actor.offline_loss_type` | `"sft"` | Hard-sample objective (`"sft"` or `"rl"`) |
+| `trainer.use_contrastive_loss` | `true` | Enable Group Alignment Loss (GAL) for partial-success groups |
+| `trainer.contrastive_beta` | `0.1` | GAL inverse-temperature coefficient |
+| `actor_rollout_ref.actor.contrastive_loss_coef` | `0.001` | GAL coefficient added to the policy loss |
 | `data.format_penalty_coef` | `0.0` | Penalty for malformed outputs |
+
+The differentiable GAL path currently supports FSDP/FSDP2 with
+`actor_rollout_ref.model.sft=false`, as used by the quick-start script. GAL uses
+reference-policy log-ratios when `ref_log_prob` is available; otherwise it keeps
+the release's reference-free margin for backward compatibility. Its per-group
+coefficients are anchored at `old_log_probs`, matching the pairwise GAL gradient
+at the rollout policy while remaining safe for micro-batch and data-parallel splits.
 
 ## Project Structure
 

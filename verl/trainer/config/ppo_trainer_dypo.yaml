@@ -338,7 +338,8 @@ trainer:
   use_symbolic_verification: false
   balance_batch: True
 
-  use_contrastive_loss: False
+  # Group Alignment Loss (GAL) for partial-success rollout groups.
+  use_contrastive_loss: True
   contrastive_beta: 0.1
   contrastive_loss_on_failures: False
   contrastive_weight_type: "inverse_success_rate"
